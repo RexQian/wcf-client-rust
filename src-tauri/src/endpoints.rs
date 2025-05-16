@@ -505,7 +505,8 @@ pub async fn send_image(image: PathMsg, wechat: Arc<Mutex<WeChat>>) -> Result<Js
     let mut image_path = PathBuf::from(image.path.clone());
 
     // 优先处理base64
-    if let Some(base64_data) = &image.base64 {
+    if !image.base64.is_empty() {
+        let base64_data = &image.base64;
         debug!("检测到base64图片数据，开始解码");
         let extension = if image.path.ends_with(".jpg") || image.path.ends_with(".jpeg") {
             "jpg"
@@ -610,6 +611,7 @@ pub async fn send_image(image: PathMsg, wechat: Arc<Mutex<WeChat>>) -> Result<Js
     let updated_image = PathMsg {
         path: image_path.to_string_lossy().to_string(),
         receiver: image.receiver,
+        base64: String::new(),
     };
 
     wechat_api_handler!(wechat, WeChat::send_image, updated_image, "发送图片消息")
