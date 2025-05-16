@@ -1020,13 +1020,13 @@ pub async fn query_room_member(
         (status = 200, description = "返回图片文件流", content_type = "image/*")
     )
 )]
-pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<impl Reply, Infallible> {
+pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Box<dyn Reply>, Infallible> {
     let wc = wechat.lock().unwrap();
-    let handle_error = |error_message: &str| -> Result<impl Reply, Infallible> {
-        Ok(warp::reply::with_status(
+    let handle_error = |error_message: &str| -> Result<Box<dyn Reply>, Infallible> {
+        Ok(Box::new(warp::reply::with_status(
             error_message,
             warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-        ))
+        )))
     };
 
     let att = AttachMsg {
@@ -1073,11 +1073,11 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<im
                         };
 
                         // 返回文件流
-                        return Ok(warp::reply::with_header(
+                        return Ok(Box::new(warp::reply::with_header(
                             content,
                             "Content-Type",
                             content_type,
-                        ));
+                        )));
                     }
                     Err(e) => return handle_error(&format!("读取文件失败: {}", e)),
                 }
@@ -1098,13 +1098,13 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<im
         (status = 200, description = "返回文件流", content_type = "application/octet-stream")
     )
 )]
-pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<impl Reply, Infallible> {
+pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<Box<dyn Reply>, Infallible> {
     let wc = wechat.lock().unwrap();
-    let handle_error = |error_message: &str| -> Result<impl Reply, Infallible> {
-        Ok(warp::reply::with_status(
+    let handle_error = |error_message: &str| -> Result<Box<dyn Reply>, Infallible> {
+        Ok(Box::new(warp::reply::with_status(
             error_message,
             warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-        ))
+        )))
     };
 
     let att = AttachMsg {
@@ -1154,11 +1154,11 @@ pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<
             };
 
             // 返回文件流
-            return Ok(warp::reply::with_header(
+            return Ok(Box::new(warp::reply::with_header(
                 content,
                 "Content-Type",
                 content_type,
-            ));
+            )));
         }
         Err(e) => return handle_error(&format!("读取文件失败: {}", e)),
     }
