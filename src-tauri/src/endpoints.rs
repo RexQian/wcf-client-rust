@@ -1021,8 +1021,7 @@ pub async fn query_room_member(
     )
 )]
 pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Box<dyn Reply>, Infallible> {
-    let wc = wechat.lock().unwrap();
-    let handle_error = |error_message: &str| -> Result<Box<dyn Reply>, Infallible> {
+    let handle_error = |error_message: String| -> Result<Box<dyn Reply>, Infallible> {
         Ok(Box::new(warp::reply::with_status(
             error_message,
             warp::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1035,13 +1034,16 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Bo
         extra: msg.extra.clone(),
     };
 
-    let status = match wc.clone().download_attach(att) {
-        Ok(status) => status,
-        Err(error) => return handle_error(&error.to_string()),
+    let status = {
+        let wc = wechat.lock().unwrap();
+        match wc.clone().download_attach(att) {
+            Ok(status) => status,
+            Err(error) => return handle_error(error.to_string()),
+        }
     };
 
     if !status {
-        return handle_error("下载失败");
+        return handle_error("下载失败".to_string());
     }
 
     let mut counter = 0;
@@ -1049,43 +1051,46 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Bo
         if counter >= msg.timeout {
             break;
         }
-        match wc.clone().decrypt_image(DecPath {
-            src: msg.extra.clone(),
-            dst: msg.dir.clone(),
-        }) {
-            Ok(path) => {
-                if path.is_empty() {
-                    counter += 1;
-                    sleep(Duration::from_secs(1));
-                    continue;
-                }
-                
-                // 读取文件内容
-                match tokio::fs::read(&path).await {
-                    Ok(content) => {
-                        // 根据文件扩展名确定 Content-Type
-                        let content_type = if path.ends_with(".jpg") || path.ends_with(".jpeg") {
-                            "image/jpeg"
-                        } else if path.ends_with(".png") {
-                            "image/png"
-                        } else {
-                            "application/octet-stream"
-                        };
-
-                        // 返回文件流
-                        return Ok(Box::new(warp::reply::with_header(
-                            content,
-                            "Content-Type",
-                            content_type,
-                        )));
-                    }
-                    Err(e) => return handle_error(&format!("读取文件失败: {}", e)),
-                }
+        let path = {
+            let wc = wechat.lock().unwrap();
+            match wc.clone().decrypt_image(DecPath {
+                src: msg.extra.clone(),
+                dst: msg.dir.clone(),
+            }) {
+                Ok(path) => path,
+                Err(error) => return handle_error(error.to_string()),
             }
-            Err(error) => return handle_error(&error.to_string()),
         };
+
+        if path.is_empty() {
+            counter += 1;
+            sleep(Duration::from_secs(1));
+            continue;
+        }
+        
+        // 读取文件内容
+        match tokio::fs::read(&path).await {
+            Ok(content) => {
+                // 根据文件扩展名确定 Content-Type
+                let content_type = if path.ends_with(".jpg") || path.ends_with(".jpeg") {
+                    "image/jpeg"
+                } else if path.ends_with(".png") {
+                    "image/png"
+                } else {
+                    "application/octet-stream"
+                };
+
+                // 返回文件流
+                return Ok(Box::new(warp::reply::with_header(
+                    content,
+                    "Content-Type",
+                    content_type,
+                )));
+            }
+            Err(e) => return handle_error(format!("读取文件失败: {}", e)),
+        }
     }
-    return handle_error("下载超时");
+    return handle_error("下载超时".to_string());
 }
 
 /// 下载文件
@@ -1099,8 +1104,7 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Bo
     )
 )]
 pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<Box<dyn Reply>, Infallible> {
-    let wc = wechat.lock().unwrap();
-    let handle_error = |error_message: &str| -> Result<Box<dyn Reply>, Infallible> {
+    let handle_error = |error_message: String| -> Result<Box<dyn Reply>, Infallible> {
         Ok(Box::new(warp::reply::with_status(
             error_message,
             warp::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1113,13 +1117,16 @@ pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<
         extra: msg.extra.clone(),
     };
 
-    let status = match wc.clone().download_attach(att) {
-        Ok(status) => status,
-        Err(error) => return handle_error(&error.to_string()),
+    let status = {
+        let wc = wechat.lock().unwrap();
+        match wc.clone().download_attach(att) {
+            Ok(status) => status,
+            Err(error) => return handle_error(error.to_string()),
+        }
     };
 
     if !status {
-        return handle_error("下载失败");
+        return handle_error("下载失败".to_string());
     }
 
     // 读取文件内容
@@ -1160,6 +1167,6 @@ pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<
                 content_type,
             )));
         }
-        Err(e) => return handle_error(&format!("读取文件失败: {}", e)),
+        Err(e) => return handle_error(format!("读取文件失败: {}", e)),
     }
 }
