@@ -244,7 +244,7 @@ pub fn get_routes(
         paths(refresh_qrcode, is_login, get_self_wxid, get_user_info, get_contacts, get_dbs, get_tables, get_msg_types, save_audio,
             refresh_pyq, send_text, send_image, send_file, send_rich_text, send_pat_msg, forward_msg, save_image,save_file,
             recv_transfer, query_sql, accept_new_friend, add_chatroom_member, invite_chatroom_member,
-            delete_chatroom_member, revoke_msg, query_room_member),
+            delete_chatroom_member, revoke_msg, query_room_member, download_image, download_file),
         components(schemas(
             ApiResponse<bool>, ApiResponse<String>, AttachMsg, AudioMsg, DbNames, DbQuery, DbTable, DbTables,
             DecPath, FieldContent, ForwardMsg, Image, SaveFile, MemberMgmt, MsgTypes, PatMsg, PathMsg, RichText, RpcContact,
@@ -291,6 +291,8 @@ pub fn get_routes(
     build_route_fn!(deletechatroommember, POST "delete-chatroom-member", delete_chatroom_member, JSON, wechat);
     build_route_fn!(revokemsg, POST "revoke-msg", revoke_msg, QUERY Id, wechat);
     build_route_fn!(queryroommember, GET "query-room-member", query_room_member, QUERY RoomId, wechat);
+    build_route_fn!(downloadimage, POST "download-image", download_image, JSON, wechat);
+    build_route_fn!(downloadfile, POST "download-file", download_file, JSON, wechat);
 
     api_doc
         .or(swagger_ui)
@@ -320,6 +322,8 @@ pub fn get_routes(
         .or(deletechatroommember(wechat.clone()))
         .or(revokemsg(wechat.clone()))
         .or(queryroommember(wechat.clone()))
+        .or(downloadimage(wechat.clone()))
+        .or(downloadfile(wechat.clone()))
 }
 
 async fn serve_swagger(
@@ -1004,4 +1008,158 @@ pub async fn query_room_member(
         },
     };
     Ok(warp::reply::json(&resp))
+}
+
+/// 下载图片
+#[utoipa::path(
+    post,
+    tag = "WCF",
+    path = "/download-image",
+    request_body = Image,
+    responses(
+        (status = 200, description = "返回图片文件流", content_type = "image/*")
+    )
+)]
+pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<impl Reply, Infallible> {
+    let wc = wechat.lock().unwrap();
+    let handle_error = |error_message: &str| -> Result<Box<dyn Reply>, Infallible> {
+        Ok(Box::new(warp::reply::with_status(
+            error_message,
+            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+        )))
+    };
+
+    let att = AttachMsg {
+        id: msg.id,
+        thumb: "".to_string(),
+        extra: msg.extra.clone(),
+    };
+
+    let status = match wc.clone().download_attach(att) {
+        Ok(status) => status,
+        Err(error) => return handle_error(&error.to_string()),
+    };
+
+    if !status {
+        return handle_error("下载失败");
+    }
+
+    let mut counter = 0;
+    loop {
+        if counter >= msg.timeout {
+            break;
+        }
+        match wc.clone().decrypt_image(DecPath {
+            src: msg.extra.clone(),
+            dst: msg.dir.clone(),
+        }) {
+            Ok(path) => {
+                if path.is_empty() {
+                    counter += 1;
+                    sleep(Duration::from_secs(1));
+                    continue;
+                }
+                
+                // 读取文件内容
+                match tokio::fs::read(&path).await {
+                    Ok(content) => {
+                        // 根据文件扩展名确定 Content-Type
+                        let content_type = if path.ends_with(".jpg") || path.ends_with(".jpeg") {
+                            "image/jpeg"
+                        } else if path.ends_with(".png") {
+                            "image/png"
+                        } else {
+                            "application/octet-stream"
+                        };
+
+                        // 返回文件流
+                        return Ok(Box::new(warp::reply::with_header(
+                            content,
+                            "Content-Type",
+                            content_type,
+                        )));
+                    }
+                    Err(e) => return handle_error(&format!("读取文件失败: {}", e)),
+                }
+            }
+            Err(error) => return handle_error(&error.to_string()),
+        };
+    }
+    return handle_error("下载超时");
+}
+
+/// 下载文件
+#[utoipa::path(
+    post,
+    tag = "WCF",
+    path = "/download-file",
+    request_body = SaveFile,
+    responses(
+        (status = 200, description = "返回文件流", content_type = "application/octet-stream")
+    )
+)]
+pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<impl Reply, Infallible> {
+    let wc = wechat.lock().unwrap();
+    let handle_error = |error_message: &str| -> Result<Box<dyn Reply>, Infallible> {
+        Ok(Box::new(warp::reply::with_status(
+            error_message,
+            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+        )))
+    };
+
+    let att = AttachMsg {
+        id: msg.id,
+        thumb: msg.thumb.to_string(),
+        extra: msg.extra.clone(),
+    };
+
+    let status = match wc.clone().download_attach(att) {
+        Ok(status) => status,
+        Err(error) => return handle_error(&error.to_string()),
+    };
+
+    if !status {
+        return handle_error("下载失败");
+    }
+
+    // 读取文件内容
+    match tokio::fs::read(&msg.extra).await {
+        Ok(content) => {
+            // 获取文件扩展名
+            let extension = std::path::Path::new(&msg.extra)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("");
+
+            // 根据文件扩展名确定 Content-Type
+            let content_type = match extension.to_lowercase().as_str() {
+                "pdf" => "application/pdf",
+                "doc" | "docx" => "application/msword",
+                "xls" | "xlsx" => "application/vnd.ms-excel",
+                "ppt" | "pptx" => "application/vnd.ms-powerpoint",
+                "zip" => "application/zip",
+                "rar" => "application/x-rar-compressed",
+                "txt" => "text/plain",
+                "json" => "application/json",
+                "xml" => "application/xml",
+                "html" | "htm" => "text/html",
+                "css" => "text/css",
+                "js" => "application/javascript",
+                "mp3" => "audio/mpeg",
+                "mp4" => "video/mp4",
+                "jpg" | "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "gif" => "image/gif",
+                _ => "application/octet-stream",
+            };
+
+            // 返回文件流
+            return Ok(Box::new(warp::reply::with_header(
+                content,
+                "Content-Type",
+                content_type,
+            )));
+        }
+        Err(e) => return handle_error(&format!("读取文件失败: {}", e)),
+    }
 }
