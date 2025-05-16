@@ -500,13 +500,48 @@ pub async fn send_text(text: TextMsg, wechat: Arc<Mutex<WeChat>>) -> Result<Json
     )
 )]
 pub async fn send_image(image: PathMsg, wechat: Arc<Mutex<WeChat>>) -> Result<Json, Infallible> {
-    // 记录图片内容
     debug!("收到图片消息:\n{:?}", image);
 
     let mut image_path = PathBuf::from(image.path.clone());
 
-    // 检查是否是网络路径
-    if image.path.starts_with("http") {
+    // 优先处理base64
+    if let Some(base64_data) = &image.base64 {
+        debug!("检测到base64图片数据，开始解码");
+        let extension = if image.path.ends_with(".jpg") || image.path.ends_with(".jpeg") {
+            "jpg"
+        } else if image.path.ends_with(".png") {
+            "png"
+        } else {
+            "png"
+        };
+        let unique_filename = Uuid::new_v4().to_string();
+        let local_image_path = PathBuf::from(format!("C:/images/{}.{}", unique_filename, extension));
+        if let Err(e) = fs::create_dir_all(local_image_path.parent().unwrap()).await {
+            debug!("创建目录失败: {:?}", e);
+            return Ok(warp::reply::json(&json!({"error": "创建目录失败"})));
+        }
+        let decoded = match base64::decode(base64_data) {
+            Ok(data) => data,
+            Err(e) => {
+                debug!("base64解码失败: {:?}", e);
+                return Ok(warp::reply::json(&json!({"error": "base64解码失败"})));
+            }
+        };
+        let mut file = match File::create(&local_image_path) {
+            Ok(f) => f,
+            Err(e) => {
+                debug!("创建文件失败: {:?}", e);
+                return Ok(warp::reply::json(&json!({"error": "创建文件失败"})));
+            }
+        };
+        let mut cursor = Cursor::new(decoded);
+        if let Err(e) = copy(&mut cursor, &mut file) {
+            debug!("保存图片失败: {:?}", e);
+            return Ok(warp::reply::json(&json!({"error": "保存图片失败"})));
+        }
+        debug!("base64图片保存成功, {:?}", local_image_path);
+        image_path = PathBuf::from(local_image_path);
+    } else if image.path.starts_with("http") {
         // 下载图片
         debug!("开始下载图片\n");
         let response = match get(&image.path).await {

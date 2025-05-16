@@ -192,6 +192,10 @@ pub struct PathMsg {
     /// 消息接收人
     #[prost(string, tag = "2")]
     pub receiver: ::prost::alloc::string::String,
+    /// base64图片数据，可选
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "iVBORw0KGgoAAAANSUhEUgAA...")]
+    pub base64: Option<String>,
 }
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[allow(clippy::derive_partial_eq_without_eq)]
