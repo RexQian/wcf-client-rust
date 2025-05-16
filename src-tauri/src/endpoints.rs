@@ -1022,7 +1022,7 @@ pub async fn query_room_member(
 )]
 pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<impl Reply, Infallible> {
     let wc = wechat.lock().unwrap();
-    let handle_error = |error_message: &str| -> Result<impl Reply, Infallible> {
+    let handle_error = |error_message: &str| -> Result<warp::reply::WithStatus<&str>, Infallible> {
         Ok(warp::reply::with_status(
             error_message,
             warp::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1100,7 +1100,7 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<im
 )]
 pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<impl Reply, Infallible> {
     let wc = wechat.lock().unwrap();
-    let handle_error = |error_message: &str| -> Result<impl Reply, Infallible> {
+    let handle_error = |error_message: &str| -> Result<warp::reply::WithStatus<&str>, Infallible> {
         Ok(warp::reply::with_status(
             error_message,
             warp::http::StatusCode::INTERNAL_SERVER_ERROR,
