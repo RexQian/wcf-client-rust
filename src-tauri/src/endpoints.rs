@@ -233,6 +233,36 @@ pub struct RoomMemberQuery {
     pub sql: String,
 }
 
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+pub struct DownloadImageParams {
+    /// 消息里的 id
+    id: u64,
+    /// 消息里的 extra
+    extra: String,
+    /// 存放目录
+    dir: String,
+    /// 超时时间，单位秒
+    #[schema(
+        minimum = 0, 
+        maximum = 255,
+        format = "uint8",
+        example = 10
+    )]
+    timeout: u8,
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+pub struct DownloadFileParams {
+    /// 消息里的 id
+    id: u64,
+    /// 消息里的 extra
+    extra: String,
+    /// 缩略图
+    thumb: String,
+}
+
 pub fn get_routes(
     wechat: Arc<Mutex<WeChat>>,
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
@@ -291,8 +321,8 @@ pub fn get_routes(
     build_route_fn!(deletechatroommember, POST "delete-chatroom-member", delete_chatroom_member, JSON, wechat);
     build_route_fn!(revokemsg, POST "revoke-msg", revoke_msg, QUERY Id, wechat);
     build_route_fn!(queryroommember, GET "query-room-member", query_room_member, QUERY RoomId, wechat);
-    build_route_fn!(downloadimage, POST "download-image", download_image, JSON, wechat);
-    build_route_fn!(downloadfile, POST "download-file", download_file, JSON, wechat);
+    build_route_fn!(downloadimage, GET "download-image", download_image, QUERY DownloadImageParams, wechat);
+    build_route_fn!(downloadfile, GET "download-file", download_file, QUERY DownloadFileParams, wechat);
 
     api_doc
         .or(swagger_ui)
@@ -1012,15 +1042,20 @@ pub async fn query_room_member(
 
 /// 下载图片
 #[utoipa::path(
-    post,
+    get,
     tag = "WCF",
     path = "/download-image",
-    request_body = Image,
+    params(
+        ("id" = u64, Query, description = "消息ID"),
+        ("extra" = String, Query, description = "extra"),
+        ("dir" = String, Query, description = "存放目录"),
+        ("timeout" = u8, Query, description = "超时时间(秒)")
+    ),
     responses(
         (status = 200, description = "返回图片文件流", content_type = "image/*")
     )
 )]
-pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Box<dyn Reply>, Infallible> {
+pub async fn download_image(params: DownloadImageParams, wechat: Arc<Mutex<WeChat>>) -> Result<Box<dyn Reply>, Infallible> {
     let handle_error = |error_message: String| -> Result<Box<dyn Reply>, Infallible> {
         Ok(Box::new(warp::reply::with_status(
             error_message,
@@ -1029,9 +1064,9 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Bo
     };
 
     let att = AttachMsg {
-        id: msg.id,
+        id: params.id,
         thumb: "".to_string(),
-        extra: msg.extra.clone(),
+        extra: params.extra.clone(),
     };
 
     let status = {
@@ -1048,14 +1083,14 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Bo
 
     let mut counter = 0;
     loop {
-        if counter >= msg.timeout {
+        if counter >= params.timeout {
             break;
         }
         let path = {
             let wc = wechat.lock().unwrap();
             match wc.clone().decrypt_image(DecPath {
-                src: msg.extra.clone(),
-                dst: msg.dir.clone(),
+                src: params.extra.clone(),
+                dst: params.dir.clone(),
             }) {
                 Ok(path) => path,
                 Err(error) => return handle_error(error.to_string()),
@@ -1095,15 +1130,19 @@ pub async fn download_image(msg: Image, wechat: Arc<Mutex<WeChat>>) -> Result<Bo
 
 /// 下载文件
 #[utoipa::path(
-    post,
+    get,
     tag = "WCF",
     path = "/download-file",
-    request_body = SaveFile,
+    params(
+        ("id" = u64, Query, description = "消息ID"),
+        ("extra" = String, Query, description = "extra"),
+        ("thumb" = String, Query, description = "缩略图")
+    ),
     responses(
         (status = 200, description = "返回文件流", content_type = "application/octet-stream")
     )
 )]
-pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<Box<dyn Reply>, Infallible> {
+pub async fn download_file(params: DownloadFileParams, wechat: Arc<Mutex<WeChat>>) -> Result<Box<dyn Reply>, Infallible> {
     let handle_error = |error_message: String| -> Result<Box<dyn Reply>, Infallible> {
         Ok(Box::new(warp::reply::with_status(
             error_message,
@@ -1112,9 +1151,9 @@ pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<
     };
 
     let att = AttachMsg {
-        id: msg.id,
-        thumb: msg.thumb.to_string(),
-        extra: msg.extra.clone(),
+        id: params.id,
+        thumb: params.thumb,
+        extra: params.extra.clone(),
     };
 
     let status = {
@@ -1130,10 +1169,10 @@ pub async fn download_file(msg: SaveFile, wechat: Arc<Mutex<WeChat>>) -> Result<
     }
 
     // 读取文件内容
-    match tokio::fs::read(&msg.extra).await {
+    match tokio::fs::read(&params.extra).await {
         Ok(content) => {
             // 获取文件扩展名
-            let extension = std::path::Path::new(&msg.extra)
+            let extension = std::path::Path::new(&params.extra)
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("");
